@@ -876,6 +876,103 @@ show_nginx_realtime_status() {
   echo "  MEM: ${mem}%"
 }
 
+# ---------- 功能7：卸载 ----------
+uninstall_script_only() {
+  note "将执行：卸载 nx 快捷命令、删除脚本目录下运行文件。"
+  if ! confirm "确认继续卸载本脚本？"; then
+    info "已取消。"
+    return 0
+  fi
+
+  # 1) 清理快捷启动命令
+  if [[ -f /usr/local/bin/nx ]]; then
+    ${SUDO} rm -f /usr/local/bin/nx
+    info "已移除：/usr/local/bin/nx"
+  else
+    warn "未发现 /usr/local/bin/nx，跳过。"
+  fi
+
+  # 2) 清理脚本目录下运行状态文件
+  rm -f "${SCRIPT_DIR}/.email.conf" 2>/dev/null || true
+
+  # 3) 彻底删除脚本目录（延迟执行，避免当前进程占用）
+  local dir_to_remove
+  dir_to_remove="$(realpath "$SCRIPT_DIR")"
+  if [[ -n "$dir_to_remove" && "$dir_to_remove" != "/" ]]; then
+    nohup bash -c "sleep 1; rm -rf '$dir_to_remove'" >/dev/null 2>&1 &
+    info "已安排删除脚本目录：${dir_to_remove}"
+  fi
+
+  info "本脚本卸载完成。"
+  exit 0
+}
+
+uninstall_nginx_only() {
+  local pkg
+  pkg="$(detect_pkg_mgr)"
+
+  warn "将彻底卸载 Nginx 并清空相关配置/日志目录。"
+  if ! confirm "确认继续卸载 Nginx？"; then
+    info "已取消。"
+    return 0
+  fi
+
+  if check_cmd systemctl; then
+    ${SUDO} systemctl stop nginx 2>/dev/null || true
+    ${SUDO} systemctl disable nginx 2>/dev/null || true
+  fi
+
+  case "$pkg" in
+    apt)
+      ${SUDO} apt-get purge -y 'nginx*' || true
+      ${SUDO} apt-get autoremove -y || true
+      ${SUDO} rm -f /etc/apt/sources.list.d/nginx.list || true
+      ;;
+    dnf|yum)
+      ${SUDO} "$pkg" remove -y 'nginx*' || true
+      ${SUDO} rm -f /etc/yum.repos.d/nginx.repo || true
+      ;;
+    *)
+      warn "未知包管理器，尝试仅清理目录。"
+      ;;
+  esac
+
+  ${SUDO} rm -rf /etc/nginx /var/log/nginx /var/cache/nginx /usr/share/nginx 2>/dev/null || true
+  info "Nginx 及其配置已清理完成。"
+}
+
+uninstall_all() {
+  warn "将执行全部卸载：本脚本 + Nginx（含配置清理）。"
+  if ! confirm "确认继续全部卸载？"; then
+    info "已取消。"
+    return 0
+  fi
+
+  uninstall_nginx_only
+  uninstall_script_only
+}
+
+uninstall_menu() {
+  while true; do
+    clear
+    echo "========== 卸载 =========="
+    echo "1) 卸载脚本（彻底卸载本脚本并清理）"
+    echo "2) 卸载 Nginx（彻底卸载并清空 Nginx 配置）"
+    echo "3) 全部卸载（脚本 + Nginx 全清理）"
+    echo "0) 返回上一级"
+    echo "=========================="
+    read -rp "请选择: " c
+
+    case "$c" in
+      1) uninstall_script_only; pause ;;
+      2) uninstall_nginx_only; pause ;;
+      3) uninstall_all; pause ;;
+      0) return 0 ;;
+      *) warn "无效输入。"; pause ;;
+    esac
+  done
+}
+
 # ---------- 菜单 ----------
 banner() {
   clear
@@ -892,12 +989,13 @@ EOF
 }
 
 main_menu() {
-  echo "1) 安装 Nginx 与环境初始化"
-  echo "2) 智能版本升级"
+  echo "1) 安装 Nginx"
+  echo "2) 升级 Nginx"
   echo "3) 添加反向代理配置"
   echo "4) 配置列表管理"
   echo "5) 证书管理（acme.sh）"
   echo "6) 流量统计与状态检查"
+  echo "7) 卸载"
   echo "0) 退出"
   echo "========================================"
 }
@@ -917,6 +1015,7 @@ main() {
       4) config_manage_menu ;;
       5) cert_menu ;;
       6) show_nginx_realtime_status; pause ;;
+      7) uninstall_menu ;;
       0) info "已退出 ${APP_NAME}。"; exit 0 ;;
       *) warn "无效输入，请输入菜单编号。"; pause ;;
     esac
