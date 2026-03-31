@@ -86,7 +86,3 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/Xiuyixx/Nginx-X/main/qui
   - 黄色：警告
   - 红色：错误
 
-## 文档约定
-
-- 本项目文档持续使用中文维护
-- 后续新增功能会同步补充到本 README
