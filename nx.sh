@@ -438,19 +438,29 @@ add_reverse_proxy() {
   if apply_conf_with_rollback "$tmp" "$target"; then
     info "反向代理配置已生效：${target}"
 
-    if confirm "是否立即自动申请证书并启用 HTTPS（80 强制跳转 443）？"; then
-      # 在当前界面直接设置/保存邮箱（若未设置）
-      if ! ensure_email_interactive; then
-        warn "邮箱未设置成功，已跳过自动证书流程。你可稍后在证书管理里设置。"
-      else
-        if issue_cert_for_domain "$domain"; then
-          if enable_https_for_conf_file "$domain" "$target"; then
-            info "已完成：反向代理 + 自动证书 + 自动 HTTPS。"
-          else
-            warn "证书已申请成功，但启用 HTTPS 失败，请检查配置后重试。"
-          fi
+    if [[ -f "${SSL_DIR}/${domain}/fullchain.pem" && -f "${SSL_DIR}/${domain}/privkey.pem" ]]; then
+      if confirm "检测到已有证书，是否立即启用证书（HTTPS 强制跳转）？"; then
+        if enable_https_for_conf_file "$domain" "$target"; then
+          info "已完成：反向代理 + HTTPS 启用。"
         else
-          warn "自动证书申请失败，当前仅保留 HTTP 反向代理配置。"
+          warn "启用 HTTPS 失败，请检查配置后重试。"
+        fi
+      fi
+    else
+      if confirm "是否立即自动申请证书并启用 HTTPS（80 强制跳转 443）？"; then
+        # 在当前界面直接设置/保存邮箱（若未设置）
+        if ! ensure_email_interactive; then
+          warn "邮箱未设置成功，已跳过自动证书流程。你可稍后在证书管理里设置。"
+        else
+          if issue_cert_for_domain "$domain"; then
+            if enable_https_for_conf_file "$domain" "$target"; then
+              info "已完成：反向代理 + 自动证书 + 自动 HTTPS。"
+            else
+              warn "证书已申请成功，但启用 HTTPS 失败，请检查配置后重试。"
+            fi
+          else
+            warn "自动证书申请失败，当前仅保留 HTTP 反向代理配置。"
+          fi
         fi
       fi
     fi
@@ -502,18 +512,28 @@ add_external_url_proxy() {
   if apply_conf_with_rollback "$tmp" "$target"; then
     info "外部反代配置已生效：${target}"
 
-    if confirm "是否立即自动申请证书并启用 HTTPS（80 强制跳转 443）？"; then
-      if ! ensure_email_interactive; then
-        warn "邮箱未设置成功，已跳过自动证书流程。你可稍后在证书管理里设置。"
-      else
-        if issue_cert_for_domain "$domain"; then
-          if enable_https_for_conf_file "$domain" "$target"; then
-            info "已完成：外部反代 + 自动证书 + 自动 HTTPS。"
-          else
-            warn "证书已申请成功，但启用 HTTPS 失败，请检查配置后重试。"
-          fi
+    if [[ -f "${SSL_DIR}/${domain}/fullchain.pem" && -f "${SSL_DIR}/${domain}/privkey.pem" ]]; then
+      if confirm "检测到已有证书，是否立即启用证书（HTTPS 强制跳转）？"; then
+        if enable_https_for_conf_file "$domain" "$target"; then
+          info "已完成：外部反代 + HTTPS 启用。"
         else
-          warn "自动证书申请失败，当前仅保留 HTTP 反代配置。"
+          warn "启用 HTTPS 失败，请检查配置后重试。"
+        fi
+      fi
+    else
+      if confirm "是否立即自动申请证书并启用 HTTPS（80 强制跳转 443）？"; then
+        if ! ensure_email_interactive; then
+          warn "邮箱未设置成功，已跳过自动证书流程。你可稍后在证书管理里设置。"
+        else
+          if issue_cert_for_domain "$domain"; then
+            if enable_https_for_conf_file "$domain" "$target"; then
+              info "已完成：外部反代 + 自动证书 + 自动 HTTPS。"
+            else
+              warn "证书已申请成功，但启用 HTTPS 失败，请检查配置后重试。"
+            fi
+          else
+            warn "自动证书申请失败，当前仅保留 HTTP 反代配置。"
+          fi
         fi
       fi
     fi
