@@ -51,7 +51,9 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/Xiuyixx/Nginx-X/main/ins
    - 添加配置：输入域名、监听端口、后端端口，支持端口复用确认
    - 外部反代：输入域名、监听端口、外部 `http/https` 上游 URL
    - 自动生成标准 Proxy Header，配置写入 `/etc/nginx/conf.d/域名-监听端口.conf`
-   - 可在添加流程中一键“自动申请证书 + 自动启用 HTTPS（80→443）”
+   - 添加完成后自动检测证书：
+     - 若已有证书：仅需确认是否启用 HTTPS
+     - 若无证书：可一键“自动申请证书 + 自动启用 HTTPS（80→443）”
    - 配置列表：统一管理上述两类配置，按状态浏览并进入三级菜单执行 启用 / 停用 / 修改 / 编辑 / 删除
 
 3. **证书管理**
