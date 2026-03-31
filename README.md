@@ -66,7 +66,6 @@ nx
 
 ## 一键安装（推荐）
 
-无需手动 `cd` 和再次输入 `nx`，执行一条命令即可安装并自动进入脚本菜单：
 
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Xiuyixx/Nginx-X/main/quick-install.sh)"
