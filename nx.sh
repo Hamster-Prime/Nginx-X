@@ -347,8 +347,11 @@ add_reverse_proxy() {
   fi
 
   if is_port_used_os "$listen_port"; then
-    error "监听端口 ${listen_port} 已被占用，无法继续。"
-    return 1
+    warn "监听端口 ${listen_port} 当前已被占用（Nginx 多站点场景通常可复用）。"
+    if ! confirm "是否继续写入配置并交由 nginx -t 校验？"; then
+      info "已取消添加配置。"
+      return 0
+    fi
   fi
 
   target="${CONF_DIR}/${domain}.conf"
