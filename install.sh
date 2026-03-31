@@ -60,8 +60,8 @@ install_local() {
 
   # 如果当前在交互终端，安装后直接进入菜单，免去手动再输入 nx
   if [[ "$NO_RUN" != "1" && -t 0 && -t 1 ]]; then
-    read -rp "是否立即启动 Nginx-X？[Y/n]: " run_now
-    if [[ -z "$run_now" || "$run_now" =~ ^[Yy]$ ]]; then
+    read -rp "是否立即启动 Nginx-X？[y/N]: " run_now
+    if [[ "$run_now" =~ ^[Yy]$ ]]; then
       exec "$TARGET_BIN"
     fi
   fi
@@ -85,8 +85,8 @@ bootstrap_install() {
   ${SUDO} bash "$INSTALL_DIR/install.sh" --no-run
 
   if [[ -t 0 && -t 1 ]]; then
-    read -rp "是否立即启动 Nginx-X？[Y/n]: " run_now
-    if [[ -z "$run_now" || "$run_now" =~ ^[Yy]$ ]]; then
+    read -rp "是否立即启动 Nginx-X？[y/N]: " run_now
+    if [[ "$run_now" =~ ^[Yy]$ ]]; then
       echo "[OK] 安装完成，正在启动 Nginx-X..."
       exec "$TARGET_BIN"
     fi
