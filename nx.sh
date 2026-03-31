@@ -15,7 +15,7 @@ NC='\033[0m'
 
 # ---------- 全局变量 ----------
 APP_NAME="Nginx-X"
-APP_VERSION="0.2.0"
+APP_VERSION="1.7.0"
 CONF_DIR="/etc/nginx/conf.d"
 SSL_DIR="/etc/nginx/ssl"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
