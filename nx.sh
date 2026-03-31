@@ -500,7 +500,7 @@ add_external_url_proxy() {
 
   build_external_proxy_conf "$domain" "$listen_port" "$upstream_url" "$tmp"
   if apply_conf_with_rollback "$tmp" "$target"; then
-    info "外部URL反代配置已生效：${target}"
+    info "外部反代配置已生效：${target}"
 
     if confirm "是否立即自动申请证书并启用 HTTPS（80 强制跳转 443）？"; then
       if ! ensure_email_interactive; then
@@ -508,7 +508,7 @@ add_external_url_proxy() {
       else
         if issue_cert_for_domain "$domain"; then
           if enable_https_for_conf_file "$domain" "$target"; then
-            info "已完成：外部URL反代 + 自动证书 + 自动 HTTPS。"
+            info "已完成：外部反代 + 自动证书 + 自动 HTTPS。"
           else
             warn "证书已申请成功，但启用 HTTPS 失败，请检查配置后重试。"
           fi
@@ -812,7 +812,7 @@ config_entry_menu() {
     clear
     echo "========== 配置管理 =========="
     echo "1) 添加配置"
-    echo "2) 外部URL反代"
+    echo "2) 外部反代"
     echo "3) 配置列表"
     echo "0) 返回上一级"
     echo "=============================="
