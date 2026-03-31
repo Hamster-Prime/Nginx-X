@@ -1333,7 +1333,9 @@ server {
         proxy_pass __UPSTREAM_PLACEHOLDER__;
         proxy_http_version 1.1;
 
-        proxy_set_header Host \$host;
+__SSL_SERVER_NAME_LINE__
+
+        proxy_set_header Host __HOST_HEADER__;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
@@ -1347,10 +1349,26 @@ server {
 EOF
 
   # 复用原配置的 proxy_pass（支持本地端口和外部URL）
-  local existing_upstream
+  local existing_upstream host_header ssl_sni_line
   existing_upstream="$(grep -Eo 'proxy_pass [^;]+' "$conf_file" | head -n1 | sed 's/^proxy_pass //')"
   [[ -z "$existing_upstream" ]] && existing_upstream="http://127.0.0.1:3000"
+
+  # 外部上游（尤其 https）需要 SNI 与上游 Host，避免 502/握手失败
+  if [[ "$existing_upstream" =~ ^https?://127\.0\.0\.1(:[0-9]+)?(/|$) ]]; then
+    host_header='\$host'
+    ssl_sni_line=''
+  else
+    host_header='\$proxy_host'
+    if [[ "$existing_upstream" =~ ^https:// ]]; then
+      ssl_sni_line='        proxy_ssl_server_name on;'
+    else
+      ssl_sni_line=''
+    fi
+  fi
+
   sed -i "s|proxy_pass __UPSTREAM_PLACEHOLDER__;|proxy_pass ${existing_upstream};|" "$tmp"
+  sed -i "s|proxy_set_header Host __HOST_HEADER__;|proxy_set_header Host ${host_header};|" "$tmp"
+  sed -i "s|__SSL_SERVER_NAME_LINE__|${ssl_sni_line}|" "$tmp"
 
   if apply_conf_with_rollback "$tmp" "$conf_file"; then
     info "HTTPS 已启用，且已配置 80 -> ${listen_port} 强制跳转。"
