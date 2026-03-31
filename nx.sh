@@ -269,6 +269,12 @@ is_port_used_os() {
   ss -lnt "( sport = :${p} )" 2>/dev/null | awk 'NR>1{print}' | grep -q .
 }
 
+conf_target_path() {
+  local domain="$1"
+  local listen_port="$2"
+  echo "${CONF_DIR}/${domain}-${listen_port}.conf"
+}
+
 build_proxy_conf() {
   local domain="$1"
   local listen_port="$2"
@@ -425,7 +431,7 @@ add_reverse_proxy() {
     fi
   fi
 
-  target="${CONF_DIR}/${domain}.conf"
+  target="$(conf_target_path "$domain" "$listen_port")"
   tmp="/tmp/nginxx-${domain}.conf"
 
   build_proxy_conf "$domain" "$listen_port" "$backend_port" "$tmp"
@@ -438,7 +444,7 @@ add_reverse_proxy() {
         warn "邮箱未设置成功，已跳过自动证书流程。你可稍后在证书管理里设置。"
       else
         if issue_cert_for_domain "$domain"; then
-          if enable_https_for_domain_value "$domain"; then
+          if enable_https_for_conf_file "$domain" "$target"; then
             info "已完成：反向代理 + 自动证书 + 自动 HTTPS。"
           else
             warn "证书已申请成功，但启用 HTTPS 失败，请检查配置后重试。"
@@ -489,7 +495,7 @@ add_external_url_proxy() {
     fi
   fi
 
-  target="${CONF_DIR}/${domain}.conf"
+  target="$(conf_target_path "$domain" "$listen_port")"
   tmp="/tmp/nginxx-external-${domain}.conf"
 
   build_external_proxy_conf "$domain" "$listen_port" "$upstream_url" "$tmp"
@@ -501,7 +507,7 @@ add_external_url_proxy() {
         warn "邮箱未设置成功，已跳过自动证书流程。你可稍后在证书管理里设置。"
       else
         if issue_cert_for_domain "$domain"; then
-          if enable_https_for_domain_value "$domain"; then
+          if enable_https_for_conf_file "$domain" "$target"; then
             info "已完成：外部URL反代 + 自动证书 + 自动 HTTPS。"
           else
             warn "证书已申请成功，但启用 HTTPS 失败，请检查配置后重试。"
@@ -644,7 +650,7 @@ modify_conf() {
   build_proxy_conf "$new_domain" "$new_listen" "$new_backend" "$tmp"
 
   # 修改后默认写入 .conf；也可选择立即停用
-  new_target="${CONF_DIR}/${new_domain}.conf"
+  new_target="$(conf_target_path "$new_domain" "$new_listen")"
   if apply_conf_with_rollback "$tmp" "$new_target"; then
     # 若原文件名和新文件名不同，且原文件仍存在则清理
     if [[ "$src" != "$new_target" && -f "$src" ]]; then
@@ -1043,15 +1049,44 @@ cert_list_and_renew_check() {
 }
 
 enable_https_for_domain() {
-  local domain conf_file ssl_conf tmp
+  local domain
   read -rp "请输入要启用 HTTPS 的域名（对应 conf 文件名）: " domain
   enable_https_for_domain_value "$domain"
 }
 
 enable_https_for_domain_value() {
-  # 参数：域名
-  local domain="$1" conf_file ssl_conf tmp
-  conf_file="${CONF_DIR}/${domain}.conf"
+  # 参数：域名（若同域名存在多个配置，将提示选择）
+  local domain="$1"
+  local -a matches
+  local idx conf_file
+
+  mapfile -t matches < <(grep -l "^# domain=${domain}$" "${CONF_DIR}"/*.conf 2>/dev/null || true)
+
+  if [[ ${#matches[@]} -eq 0 ]]; then
+    error "未找到该域名对应配置：${domain}"
+    return 1
+  elif [[ ${#matches[@]} -eq 1 ]]; then
+    conf_file="${matches[0]}"
+  else
+    echo "检测到多个同域名配置，请选择："
+    for i in "${!matches[@]}"; do
+      echo "  $((i+1))) $(basename "${matches[$i]}")"
+    done
+    read -rp "选择序号: " idx
+    if ! [[ "$idx" =~ ^[0-9]+$ ]] || (( idx < 1 || idx > ${#matches[@]} )); then
+      error "无效序号。"
+      return 1
+    fi
+    conf_file="${matches[$((idx-1))]}"
+  fi
+
+  enable_https_for_conf_file "$domain" "$conf_file"
+}
+
+enable_https_for_conf_file() {
+  local domain="$1"
+  local conf_file="$2"
+  local ssl_conf tmp
 
   if [[ ! -f "$conf_file" ]]; then
     error "配置文件不存在：${conf_file}"
