@@ -1002,6 +1002,29 @@ uninstall_nginx_only() {
   info "Nginx 及其配置已清理完成。"
 }
 
+uninstall_acme_only() {
+  warn "将彻底卸载 acme.sh 并清空证书/配置及邮箱信息。"
+  if ! confirm "确认继续卸载 Acme？"; then
+    info "已取消。"
+    return 0
+  fi
+
+  # 1) 删除 acme.sh 安装目录及证书目录
+  rm -rf "$HOME/.acme.sh" 2>/dev/null || true
+  ${SUDO} rm -rf "$SSL_DIR" 2>/dev/null || true
+
+  # 2) 删除 crontab 中 acme 自动续期任务
+  if crontab -l >/tmp/.nginxx_cron 2>/dev/null; then
+    grep -v 'acme.sh --cron' /tmp/.nginxx_cron | crontab - || true
+    rm -f /tmp/.nginxx_cron
+  fi
+
+  # 3) 清理邮箱持久化信息
+  rm -f "$EMAIL_CONF" 2>/dev/null || true
+
+  info "Acme 及相关配置已清理完成。"
+}
+
 uninstall_all() {
   warn "将执行全部卸载：本脚本 + Nginx（含配置清理）。"
   if ! confirm "确认继续全部卸载？"; then
@@ -1010,6 +1033,7 @@ uninstall_all() {
   fi
 
   uninstall_nginx_only
+  uninstall_acme_only
   uninstall_script_only
 }
 
@@ -1019,7 +1043,8 @@ uninstall_menu() {
     echo "========== 卸载 =========="
     echo "1) 卸载脚本（彻底卸载本脚本并清理）"
     echo "2) 卸载 Nginx（彻底卸载并清空 Nginx 配置）"
-    echo "3) 全部卸载（脚本 + Nginx 全清理）"
+    echo "3) 卸载 Acme（彻底卸载并清空 Acme 配置/邮箱信息）"
+    echo "4) 全部卸载（脚本 + Nginx + Acme 全清理）"
     echo "0) 返回上一级"
     echo "=========================="
     read -rp "请选择: " c
@@ -1027,7 +1052,8 @@ uninstall_menu() {
     case "$c" in
       1) uninstall_script_only; pause ;;
       2) uninstall_nginx_only; pause ;;
-      3) uninstall_all; pause ;;
+      3) uninstall_acme_only; pause ;;
+      4) uninstall_all; pause ;;
       0) return 0 ;;
       *) warn "无效输入。"; pause ;;
     esac
