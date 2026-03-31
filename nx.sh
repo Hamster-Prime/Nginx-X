@@ -765,13 +765,23 @@ issue_cert_for_domain() {
 }
 
 cert_list_and_renew_check() {
-  local base="$HOME/.acme.sh"
-  if [[ ! -d "$base" ]]; then
-    warn "未发现任何证书目录。"
+  echo "证书列表："
+
+  # 优先使用 acme.sh 官方列表输出，避免按目录后缀匹配导致漏显示（如 .pp.ua 等）
+  if [[ -x "$HOME/.acme.sh/acme.sh" ]]; then
+    local list_out
+    list_out="$($HOME/.acme.sh/acme.sh --list 2>/dev/null || true)"
+
+    # acme.sh --list 通常首行为表头，后续行为证书记录
+    if [[ -n "$list_out" ]] && [[ "$(echo "$list_out" | wc -l)" -gt 1 ]]; then
+      echo "$list_out"
+    else
+      warn "当前未发现已签发证书。"
+    fi
   else
-    echo "证书目录列表："
-    find "$base" -maxdepth 1 -type d -name '*.com*' -o -name '*.cn*' 2>/dev/null | sed 's#^.*/##' || true
+    warn "未检测到 acme.sh，请先申请证书。"
   fi
+
   ensure_acme_cron
 }
 
