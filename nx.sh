@@ -388,7 +388,13 @@ list_all_conf_files() {
 
 print_conf_list() {
   local i=1
-  mapfile -t FILES < <(list_all_conf_files)
+  local -a enabled_files disabled_files
+
+  # 二级列表：先显示已启用（.conf），再显示已停用（.bak/其他后缀）
+  mapfile -t enabled_files < <(ls -1 "$CONF_DIR" 2>/dev/null | grep -E '\.conf$' | sort || true)
+  mapfile -t disabled_files < <(ls -1 "$CONF_DIR" 2>/dev/null | grep -E '\.conf\..+$' | sort || true)
+
+  FILES=("${enabled_files[@]}" "${disabled_files[@]}")
 
   if [[ ${#FILES[@]} -eq 0 ]]; then
     warn "当前没有可管理的配置文件。"
@@ -407,22 +413,13 @@ print_conf_list() {
   return 0
 }
 
-pick_conf_file() {
-  local idx
-  if ! print_conf_list; then
-    return 1
-  fi
-  read -rp "选择文件序号: " idx
-  if ! [[ "$idx" =~ ^[0-9]+$ ]] || (( idx < 1 || idx > ${#FILES[@]} )); then
-    error "无效序号。"
-    return 1
-  fi
-  echo "${FILES[$((idx-1))]}"
-}
-
 enable_conf() {
   local file src dst
-  file="$(pick_conf_file)" || return 1
+  file="${1:-}"
+  if [[ -z "$file" ]]; then
+    error "未指定配置文件。"
+    return 1
+  fi
   src="${CONF_DIR}/${file}"
 
   if [[ "$file" =~ \.conf$ ]]; then
@@ -446,7 +443,11 @@ enable_conf() {
 
 disable_conf() {
   local file src dst
-  file="$(pick_conf_file)" || return 1
+  file="${1:-}"
+  if [[ -z "$file" ]]; then
+    error "未指定配置文件。"
+    return 1
+  fi
   src="${CONF_DIR}/${file}"
 
   if [[ ! "$file" =~ \.conf$ ]]; then
@@ -470,7 +471,11 @@ disable_conf() {
 
 modify_conf() {
   local file src new_domain new_listen new_backend tmp new_target
-  file="$(pick_conf_file)" || return 1
+  file="${1:-}"
+  if [[ -z "$file" ]]; then
+    error "未指定配置文件。"
+    return 1
+  fi
   src="${CONF_DIR}/${file}"
 
   read -rp "新的域名: " new_domain
@@ -531,7 +536,11 @@ modify_conf() {
 
 delete_conf() {
   local file target
-  file="$(pick_conf_file)" || return 1
+  file="${1:-}"
+  if [[ -z "$file" ]]; then
+    error "未指定配置文件。"
+    return 1
+  fi
   target="${CONF_DIR}/${file}"
 
   if ! confirm "确认永久删除 ${file} ?"; then
@@ -557,6 +566,31 @@ delete_conf() {
   fi
 }
 
+config_file_action_menu() {
+  local file="$1"
+
+  while true; do
+    clear
+    echo "====== 配置操作：${file} ======"
+    echo "1) 启用"
+    echo "2) 停用"
+    echo "3) 修改"
+    echo "4) 删除"
+    echo "0) 返回上一级"
+    echo "============================"
+    read -rp "请选择: " c
+
+    case "$c" in
+      1) enable_conf "$file"; pause; return 0 ;;
+      2) disable_conf "$file"; pause; return 0 ;;
+      3) modify_conf "$file"; pause; return 0 ;;
+      4) delete_conf "$file"; pause; return 0 ;;
+      0) return 0 ;;
+      *) warn "无效输入。"; pause ;;
+    esac
+  done
+}
+
 config_manage_menu() {
   require_nginx_installed || {
     pause
@@ -566,24 +600,26 @@ config_manage_menu() {
   while true; do
     clear
     echo "========== 配置列表管理 =========="
-    print_conf_list || true
+    if ! print_conf_list; then
+      pause
+      return 0
+    fi
     echo
-    echo "1) 启用"
-    echo "2) 停用"
-    echo "3) 修改"
-    echo "4) 删除"
     echo "0) 返回上一级"
     echo "==============================="
-    read -rp "请选择: " c
+    read -rp "请选择配置序号: " c
 
-    case "$c" in
-      1) enable_conf; pause ;;
-      2) disable_conf; pause ;;
-      3) modify_conf; pause ;;
-      4) delete_conf; pause ;;
-      0) return 0 ;;
-      *) warn "无效输入。"; pause ;;
-    esac
+    if [[ "$c" == "0" ]]; then
+      return 0
+    fi
+
+    if ! [[ "$c" =~ ^[0-9]+$ ]] || (( c < 1 || c > ${#FILES[@]} )); then
+      warn "无效序号。"
+      pause
+      continue
+    fi
+
+    config_file_action_menu "${FILES[$((c-1))]}"
   done
 }
 
