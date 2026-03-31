@@ -692,6 +692,25 @@ config_manage_menu() {
   done
 }
 
+config_entry_menu() {
+  while true; do
+    clear
+    echo "========== 配置管理 =========="
+    echo "1) 添加配置"
+    echo "2) 配置列表"
+    echo "0) 返回上一级"
+    echo "=============================="
+    read -rp "请选择: " c
+
+    case "$c" in
+      1) add_reverse_proxy; pause ;;
+      2) config_manage_menu ;;
+      0) return 0 ;;
+      *) warn "无效输入。"; pause ;;
+    esac
+  done
+}
+
 # ---------- 功能5：证书管理（acme.sh） ----------
 load_email() {
   if [[ -f "$EMAIL_CONF" ]]; then
@@ -1264,11 +1283,10 @@ banner() {
 
 main_menu() {
   echo "1) 安装升级Nginx"
-  echo "2) 添加配置"
-  echo "3) 配置列表"
-  echo "4) 证书管理"
-  echo "5) 实时信息"
-  echo "6) 卸载"
+  echo "2) 配置管理"
+  echo "3) 证书管理"
+  echo "4) 实时信息"
+  echo "5) 卸载"
   echo "0) 退出"
   echo "========================================"
 }
@@ -1283,11 +1301,10 @@ main() {
 
     case "$choice" in
       1) install_or_upgrade_nginx; pause ;;
-      2) add_reverse_proxy; pause ;;
-      3) config_manage_menu ;;
-      4) cert_menu ;;
-      5) show_nginx_realtime_status ;;
-      6) uninstall_menu ;;
+      2) config_entry_menu ;;
+      3) cert_menu ;;
+      4) show_nginx_realtime_status ;;
+      5) uninstall_menu ;;
       0) info "已退出 ${APP_NAME}。"; exit 0 ;;
       *) warn "无效输入，请输入菜单编号。"; pause ;;
     esac
