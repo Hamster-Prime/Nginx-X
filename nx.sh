@@ -844,10 +844,20 @@ issue_cert() {
   "$HOME/.acme.sh/acme.sh" --set-default-ca --server letsencrypt >/dev/null 2>&1 || true
   "$HOME/.acme.sh/acme.sh" --register-account -m "$ACME_EMAIL" >/dev/null 2>&1 || true
 
-  if ! "$HOME/.acme.sh/acme.sh" --issue -d "$domain" --webroot /usr/share/nginx/html; then
-    error "证书申请失败，请确认域名解析和 80 端口可访问。"
+  local issue_output retry_after
+  issue_output="$($HOME/.acme.sh/acme.sh --issue -d "$domain" --webroot /usr/share/nginx/html 2>&1)" || {
+    echo "$issue_output"
+
+    if echo "$issue_output" | grep -qi 'rateLimited\|too many certificates'; then
+      retry_after="$(echo "$issue_output" | sed -n 's/.*retry after \([^:]*UTC\).*/\1/p' | head -n1)"
+      error "证书申请失败：触发 Let\'s Encrypt 频率限制（429）。"
+      [[ -n "$retry_after" ]] && warn "可重试时间（UTC）：$retry_after"
+      warn "这是 CA 侧限制，不是你服务器或端口配置问题。"
+    else
+      error "证书申请失败，请确认域名解析和 80 端口可访问。"
+    fi
     return 1
-  fi
+  }
 
   ${SUDO} mkdir -p "${SSL_DIR}/${domain}"
   "$HOME/.acme.sh/acme.sh" --install-cert -d "$domain" \
@@ -876,10 +886,20 @@ issue_cert_for_domain() {
   "$HOME/.acme.sh/acme.sh" --set-default-ca --server letsencrypt >/dev/null 2>&1 || true
   "$HOME/.acme.sh/acme.sh" --register-account -m "$ACME_EMAIL" >/dev/null 2>&1 || true
 
-  if ! "$HOME/.acme.sh/acme.sh" --issue -d "$domain" --webroot /usr/share/nginx/html; then
-    error "自动申请证书失败，请确认域名解析和 80 端口可访问。"
+  local issue_output retry_after
+  issue_output="$($HOME/.acme.sh/acme.sh --issue -d "$domain" --webroot /usr/share/nginx/html 2>&1)" || {
+    echo "$issue_output"
+
+    if echo "$issue_output" | grep -qi 'rateLimited\|too many certificates'; then
+      retry_after="$(echo "$issue_output" | sed -n 's/.*retry after \([^:]*UTC\).*/\1/p' | head -n1)"
+      error "自动申请证书失败：触发 Let\'s Encrypt 频率限制（429）。"
+      [[ -n "$retry_after" ]] && warn "可重试时间（UTC）：$retry_after"
+      warn "这是 CA 侧限制，不是你服务器或端口配置问题。"
+    else
+      error "自动申请证书失败，请确认域名解析和 80 端口可访问。"
+    fi
     return 1
-  fi
+  }
 
   ${SUDO} mkdir -p "${SSL_DIR}/${domain}"
   "$HOME/.acme.sh/acme.sh" --install-cert -d "$domain" \
