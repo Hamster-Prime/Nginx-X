@@ -48,8 +48,8 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/Xiuyixx/Nginx-X/main/ins
 
 2. **配置管理**
    - 二级菜单包含：`添加配置` / `外部反代` / `配置列表`
-   - 添加配置：输入域名、监听端口、后端端口，支持端口复用确认
-   - 外部反代：输入域名、监听端口、外部 `http/https` 上游 URL
+   - 添加配置：输入域名或本机IPv4、监听端口、后端端口，支持端口复用确认
+   - 外部反代：输入域名或本机IPv4、监听端口、外部 `http/https` 上游 URL
    - 自动生成标准 Proxy Header，配置写入 `/etc/nginx/conf.d/域名-监听端口.conf`
    - 添加完成后自动检测证书：
      - 若已有证书：仅需确认是否启用 HTTPS

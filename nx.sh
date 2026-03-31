@@ -259,6 +259,16 @@ valid_domain() {
   [[ "$d" =~ ^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]
 }
 
+valid_ipv4_host() {
+  local ip="$1"
+  [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
+}
+
+valid_server_name_input() {
+  local v="$1"
+  valid_domain "$v" || valid_ipv4_host "$v"
+}
+
 valid_port() {
   local p="$1"
   [[ "$p" =~ ^[0-9]+$ ]] && (( p >= 1 && p <= 65535 ))
@@ -397,9 +407,9 @@ add_reverse_proxy() {
 
   require_nginx_installed || return 1
 
-  read -rp "请输入域名（如 example.com）: " domain
-  if ! valid_domain "$domain"; then
-    error "域名格式不合法。"
+  read -rp "请输入域名或本机IP（如 example.com / 192.168.1.10）: " domain
+  if ! valid_server_name_input "$domain"; then
+    error "输入格式不合法，请输入域名或 IPv4 地址。"
     return 1
   fi
 
@@ -438,6 +448,12 @@ add_reverse_proxy() {
   if apply_conf_with_rollback "$tmp" "$target"; then
     info "反向代理配置已生效：${target}"
 
+    if valid_ipv4_host "$domain"; then
+      warn "当前使用的是 IP，证书自动申请通常不适用，已跳过证书流程。"
+      rm -f "$tmp"
+      return 0
+    fi
+
     if [[ -f "${SSL_DIR}/${domain}/fullchain.pem" && -f "${SSL_DIR}/${domain}/privkey.pem" ]]; then
       if confirm "检测到已有证书，是否立即启用证书（HTTPS 强制跳转）？"; then
         if enable_https_for_conf_file "$domain" "$target"; then
@@ -473,9 +489,9 @@ add_external_url_proxy() {
 
   require_nginx_installed || return 1
 
-  read -rp "请输入域名（如 example.com）: " domain
-  if ! valid_domain "$domain"; then
-    error "域名格式不合法。"
+  read -rp "请输入域名或本机IP（如 example.com / 192.168.1.10）: " domain
+  if ! valid_server_name_input "$domain"; then
+    error "输入格式不合法，请输入域名或 IPv4 地址。"
     return 1
   fi
 
@@ -511,6 +527,12 @@ add_external_url_proxy() {
   build_external_proxy_conf "$domain" "$listen_port" "$upstream_url" "$tmp"
   if apply_conf_with_rollback "$tmp" "$target"; then
     info "外部反代配置已生效：${target}"
+
+    if valid_ipv4_host "$domain"; then
+      warn "当前使用的是 IP，证书自动申请通常不适用，已跳过证书流程。"
+      rm -f "$tmp"
+      return 0
+    fi
 
     if [[ -f "${SSL_DIR}/${domain}/fullchain.pem" && -f "${SSL_DIR}/${domain}/privkey.pem" ]]; then
       if confirm "检测到已有证书，是否立即启用证书（HTTPS 强制跳转）？"; then
