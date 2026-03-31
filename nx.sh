@@ -1275,7 +1275,7 @@ enable_https_for_domain_value() {
 enable_https_for_conf_file() {
   local domain="$1"
   local conf_file="$2"
-  local ssl_conf tmp
+  local ssl_conf tmp listen_port redirect_suffix
 
   if [[ ! -f "$conf_file" ]]; then
     error "配置文件不存在：${conf_file}"
@@ -1287,13 +1287,23 @@ enable_https_for_conf_file() {
     return 1
   fi
 
+  # 优先读取配置注释中的监听端口，缺失时回退 443
+  listen_port="$(grep -E '^# listen_port=' "$conf_file" 2>/dev/null | head -n1 | sed 's/^# listen_port=//')"
+  [[ -z "$listen_port" ]] && listen_port="443"
+  if [[ "$listen_port" == "443" ]]; then
+    redirect_suffix=""
+  else
+    redirect_suffix=":${listen_port}"
+  fi
+
   tmp="/tmp/nginxx-https-${domain}.conf"
 
-  # 直接生成强制跳转 HTTPS 的配置（80 -> 443）
+  # 生成 HTTPS 配置：继承原监听端口（支持非标端口，如 7777）
   cat > "$tmp" <<EOF
 # managed_by=Nginx-X
 # domain=${domain}
 # https_enabled=true
+# listen_port=${listen_port}
 
 server {
     listen 80;
@@ -1306,11 +1316,12 @@ server {
         try_files \$uri =404;
     }
 
-    return 301 https://\$host\$request_uri;
+    return 301 https://\$host${redirect_suffix}\$request_uri;
 }
 
 server {
-    listen 443 ssl http2;
+    listen ${listen_port} ssl;
+    http2 on;
     server_name ${domain};
 
     ssl_certificate     ${SSL_DIR}/${domain}/fullchain.pem;
@@ -1342,7 +1353,7 @@ EOF
   sed -i "s|proxy_pass __UPSTREAM_PLACEHOLDER__;|proxy_pass ${existing_upstream};|" "$tmp"
 
   if apply_conf_with_rollback "$tmp" "$conf_file"; then
-    info "HTTPS 已启用，且已配置 80 -> 443 强制跳转。"
+    info "HTTPS 已启用，且已配置 80 -> ${listen_port} 强制跳转。"
   fi
 
   rm -f "$tmp"
