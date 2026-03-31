@@ -907,34 +907,104 @@ show_nginx_realtime_status() {
 
   ensure_status_endpoint || true
 
-  local stat active rw waiting
-  stat="$(curl -fsS http://127.0.0.1:8088/nginx_status 2>/dev/null || true)"
+  local prev_requests=0 prev_rx=0 prev_tx=0 initialized=0
 
-  if [[ -z "$stat" ]]; then
-    warn "未能读取 nginx_status，可能未启用或端口受限。"
-  else
-    active="$(echo "$stat" | awk '/Active connections/ {print $3}')"
-    rw="$(echo "$stat" | awk 'NR==4 {print $1" "$2" "$3}')"
-    reading="$(echo "$rw" | awk '{print $1}')"
-    writing="$(echo "$rw" | awk '{print $2}')"
-    waiting="$(echo "$rw" | awk '{print $3}')"
+  while true; do
+    local stat active reading writing waiting accepts handled requests qps
+    local cpu mem workers master_pid start_time rx tx rx_rate tx_rate
 
-    echo "Nginx 连接状态："
-    echo "  Active:  ${active:-N/A}"
-    echo "  Reading: ${reading:-N/A}"
-    echo "  Writing: ${writing:-N/A}"
-    echo "  Waiting: ${waiting:-N/A}"
-  fi
+    stat="$(curl -fsS http://127.0.0.1:8088/nginx_status 2>/dev/null || true)"
 
-  # 汇总 nginx 进程 CPU/内存
-  local cpu mem
-  cpu="$(ps -C nginx -o %cpu= 2>/dev/null | awk '{s+=$1} END {if(NR==0) print "0.00"; else printf "%.2f", s}')"
-  mem="$(ps -C nginx -o %mem= 2>/dev/null | awk '{s+=$1} END {if(NR==0) print "0.00"; else printf "%.2f", s}')"
+    active="N/A"
+    reading="N/A"
+    writing="N/A"
+    waiting="N/A"
+    accepts="N/A"
+    handled="N/A"
+    requests="0"
+    qps="0"
 
-  echo
-  echo "Nginx 进程资源占用："
-  echo "  CPU: ${cpu}%"
-  echo "  MEM: ${mem}%"
+    if [[ -n "$stat" ]]; then
+      active="$(echo "$stat" | awk '/Active connections/ {print $3}')"
+      accepts="$(echo "$stat" | awk 'NR==3 {print $1}')"
+      handled="$(echo "$stat" | awk 'NR==3 {print $2}')"
+      requests="$(echo "$stat" | awk 'NR==3 {print $3}')"
+      reading="$(echo "$stat" | awk 'NR==4 {print $2}')"
+      writing="$(echo "$stat" | awk 'NR==4 {print $4}')"
+      waiting="$(echo "$stat" | awk 'NR==4 {print $6}')"
+    fi
+
+    if [[ $initialized -eq 1 ]]; then
+      qps=$((requests - prev_requests))
+      (( qps < 0 )) && qps=0
+    fi
+
+    cpu="$(ps -C nginx -o %cpu= 2>/dev/null | awk '{s+=$1} END {if(NR==0) print "0.0"; else printf "%.1f", s}')"
+    mem="$(ps -C nginx -o %mem= 2>/dev/null | awk '{s+=$1} END {if(NR==0) print "0.0"; else printf "%.1f", s}')"
+
+    workers="$(pgrep -fc 'nginx: worker process' 2>/dev/null || echo 0)"
+    master_pid="$(pgrep -xo nginx 2>/dev/null || true)"
+    if [[ -n "$master_pid" ]]; then
+      start_time="$(ps -p "$master_pid" -o lstart= 2>/dev/null | awk '{$1=$1;print}')"
+    else
+      start_time="N/A"
+    fi
+
+    rx="$(awk -F'[: ]+' 'NR>2 && $1!="lo" {s+=$3} END{print s+0}' /proc/net/dev 2>/dev/null)"
+    tx="$(awk -F'[: ]+' 'NR>2 && $1!="lo" {s+=$11} END{print s+0}' /proc/net/dev 2>/dev/null)"
+
+    if [[ $initialized -eq 1 ]]; then
+      rx_rate="$(awk -v d=$((rx-prev_rx)) 'BEGIN{if(d<0)d=0; printf "%.1f", d/1024/1024}')"
+      tx_rate="$(awk -v d=$((tx-prev_tx)) 'BEGIN{if(d<0)d=0; printf "%.1f", d/1024/1024}')"
+    else
+      rx_rate="0.0"
+      tx_rate="0.0"
+      initialized=1
+    fi
+
+    prev_requests="$requests"
+    prev_rx="$rx"
+    prev_tx="$tx"
+
+    clear
+    cat <<EOF
+==============================
+ Nginx 实时状态
+==============================
+
+连接状态
+Active: ${active}
+Reading: ${reading}
+Writing: ${writing}
+Waiting: ${waiting}
+
+请求统计
+Accepts: ${accepts}
+Handled: ${handled}
+Requests: ${requests}
+QPS: ${qps} req/s
+
+系统资源
+CPU: ${cpu} %
+MEM: ${mem} %
+
+Nginx信息
+Worker进程: ${workers}
+启动时间: ${start_time}
+
+网络流量
+RX: ${rx_rate} MB/s
+TX: ${tx_rate} MB/s
+
+==============================
+按回车返回（每秒自动刷新）
+EOF
+
+    # 每秒刷新；检测到任意键输入则退出
+    if read -r -s -n 1 -t 1 _key; then
+      break
+    fi
+  done
 }
 
 # ---------- 功能7：卸载 ----------
@@ -1073,7 +1143,7 @@ main_menu() {
   echo "3) 添加配置"
   echo "4) 配置列表"
   echo "5) 证书管理"
-  echo "6) 详情统计"
+  echo "6) 实时信息"
   echo "7) 卸载"
   echo "0) 退出"
   echo "========================================"
