@@ -1174,6 +1174,57 @@ cleanup_http_challenge_server() {
   ${SUDO} rm -f "$challenge_conf" 2>/dev/null || true
 }
 
+precheck_http01() {
+  # 证书申请前自检：DNS、80监听、challenge本地命中、域名回环可达
+  local domain="$1"
+  local token file_path local_url domain_url local_body domain_body
+
+  note "开始执行 HTTP-01 申请前自检..."
+
+  # 1) DNS 解析检查
+  local dns_out
+  dns_out="$(getent ahosts "$domain" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ' || true)"
+  if [[ -z "$dns_out" ]]; then
+    error "自检失败：域名 ${domain} 未解析到任何 IP。"
+    return 1
+  fi
+  info "DNS解析：${dns_out}"
+
+  # 2) 本机80监听检查
+  if ! ss -lnt | awk 'NR>1{print $4}' | grep -qE '(^|:)80$'; then
+    error "自检失败：本机未监听 80 端口。"
+    return 1
+  fi
+
+  # 3) challenge 文件本地命中检查
+  token="nginxx-check-$(date +%s)-$RANDOM"
+  file_path="/usr/share/nginx/html/.well-known/acme-challenge/${token}"
+  ${SUDO} mkdir -p "$(dirname "$file_path")"
+  echo "$token" | ${SUDO} tee "$file_path" >/dev/null
+
+  local_url="http://127.0.0.1/.well-known/acme-challenge/${token}"
+  local_body="$(curl -fsS --max-time 8 "$local_url" 2>/dev/null || true)"
+  if [[ "$local_body" != "$token" ]]; then
+    ${SUDO} rm -f "$file_path" 2>/dev/null || true
+    error "自检失败：本机 challenge 路径未命中（${local_url}）。"
+    return 1
+  fi
+
+  # 4) 域名回环可达检查（模拟 CA 通过域名访问 80）
+  domain_url="http://${domain}/.well-known/acme-challenge/${token}"
+  domain_body="$(curl -fsS --max-time 10 "$domain_url" 2>/dev/null || true)"
+  ${SUDO} rm -f "$file_path" 2>/dev/null || true
+
+  if [[ "$domain_body" != "$token" ]]; then
+    error "自检失败：域名 ${domain} 的 80 回源不可达或返回内容不匹配。"
+    warn "请检查云安全组/防火墙/NAT/CDN 对 80 端口的放行。"
+    return 1
+  fi
+
+  info "HTTP-01 自检通过。"
+  return 0
+}
+
 issue_cert() {
   local domain challenge_conf
   load_email
@@ -1196,6 +1247,12 @@ issue_cert() {
   if ! reload_nginx_safe; then
     cleanup_http_challenge_server "$challenge_conf"
     error "证书申请前校验失败：Nginx 配置未生效。"
+    return 1
+  fi
+
+  if ! precheck_http01 "$domain"; then
+    cleanup_http_challenge_server "$challenge_conf"
+    reload_nginx_safe || true
     return 1
   fi
 
@@ -1252,6 +1309,12 @@ issue_cert_for_domain() {
   if ! reload_nginx_safe; then
     cleanup_http_challenge_server "$challenge_conf"
     error "证书申请前校验失败：Nginx 配置未生效。"
+    return 1
+  fi
+
+  if ! precheck_http01 "$domain"; then
+    cleanup_http_challenge_server "$challenge_conf"
+    reload_nginx_safe || true
     return 1
   fi
 

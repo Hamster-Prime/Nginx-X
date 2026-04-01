@@ -62,6 +62,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/Xiuyixx/Nginx-X/main/ins
 3. **证书管理**
    - 设置邮箱（持久化到脚本目录 `.email.conf`）
    - 自动安装 acme.sh 并申请证书（HTTP 验证）
+   - 申请前自动执行 HTTP-01 自检（DNS/80监听/challenge 路径/域名回源）
    - 证书列表：按编号展示已有证书，并显示续期任务状态
    - 证书操作：支持按编号执行 重新申请 / 启停续期 / 删除证书
    - 启用证书时先从配置列表选择目标配置
