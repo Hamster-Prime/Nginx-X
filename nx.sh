@@ -1126,8 +1126,47 @@ ensure_acme_location_for_domain_conf() {
   rm -f "$tmp_file"
 }
 
+ensure_http_challenge_server() {
+  # 为“非80端口业务配置”补一个临时 80 验证入口，保证 HTTP-01 可达
+  local domain="$1"
+  local challenge_conf="${CONF_DIR}/.acme-challenge-${domain}.conf"
+
+  if grep -R -E "server_name[[:space:]]+${domain}[[:space:]]*;" "${CONF_DIR}"/*.conf 2>/dev/null | grep -q "listen 80"; then
+    # 已存在80监听同域名配置，无需额外创建
+    echo ""
+    return 0
+  fi
+
+  cat > /tmp/.acme-challenge-${domain}.conf <<EOF
+server {
+    listen 80;
+    server_name ${domain};
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /usr/share/nginx/html;
+        default_type "text/plain";
+        try_files \$uri =404;
+    }
+
+    location / {
+        return 404;
+    }
+}
+EOF
+
+  ${SUDO} cp -a /tmp/.acme-challenge-${domain}.conf "$challenge_conf"
+  rm -f /tmp/.acme-challenge-${domain}.conf
+  echo "$challenge_conf"
+}
+
+cleanup_http_challenge_server() {
+  local challenge_conf="$1"
+  [[ -z "$challenge_conf" ]] && return 0
+  ${SUDO} rm -f "$challenge_conf" 2>/dev/null || true
+}
+
 issue_cert() {
-  local domain
+  local domain challenge_conf
   load_email
 
   if [[ -z "${ACME_EMAIL:-}" ]]; then
@@ -1142,6 +1181,14 @@ issue_cert() {
   fi
 
   ensure_acme_location_for_domain_conf "$domain"
+  challenge_conf="$(ensure_http_challenge_server "$domain")"
+
+  # 确保挑战配置已生效
+  if ! reload_nginx_safe; then
+    cleanup_http_challenge_server "$challenge_conf"
+    error "证书申请前校验失败：Nginx 配置未生效。"
+    return 1
+  fi
 
   ensure_acme_installed || return 1
 
@@ -1152,6 +1199,8 @@ issue_cert() {
   local issue_output retry_after
   issue_output="$($HOME/.acme.sh/acme.sh --issue -d "$domain" --webroot /usr/share/nginx/html 2>&1)" || {
     echo "$issue_output"
+    cleanup_http_challenge_server "$challenge_conf"
+    reload_nginx_safe || true
 
     if echo "$issue_output" | grep -qi 'rateLimited\|too many certificates'; then
       retry_after="$(echo "$issue_output" | sed -n 's/.*retry after \([^:]*UTC\).*/\1/p' | head -n1)"
@@ -1163,6 +1212,9 @@ issue_cert() {
     fi
     return 1
   }
+
+  cleanup_http_challenge_server "$challenge_conf"
+  reload_nginx_safe || true
 
   ${SUDO} mkdir -p "${SSL_DIR}/${domain}"
   "$HOME/.acme.sh/acme.sh" --install-cert -d "$domain" \
@@ -1176,6 +1228,7 @@ issue_cert() {
 issue_cert_for_domain() {
   # 参数：域名；用于“添加反向代理后自动申请证书”场景
   local domain="$1"
+  local challenge_conf
   load_email
 
   if [[ -z "${ACME_EMAIL:-}" ]]; then
@@ -1184,6 +1237,14 @@ issue_cert_for_domain() {
   fi
 
   ensure_acme_location_for_domain_conf "$domain"
+  challenge_conf="$(ensure_http_challenge_server "$domain")"
+
+  # 确保挑战配置已生效
+  if ! reload_nginx_safe; then
+    cleanup_http_challenge_server "$challenge_conf"
+    error "证书申请前校验失败：Nginx 配置未生效。"
+    return 1
+  fi
 
   ensure_acme_installed || return 1
 
@@ -1194,6 +1255,8 @@ issue_cert_for_domain() {
   local issue_output retry_after
   issue_output="$($HOME/.acme.sh/acme.sh --issue -d "$domain" --webroot /usr/share/nginx/html 2>&1)" || {
     echo "$issue_output"
+    cleanup_http_challenge_server "$challenge_conf"
+    reload_nginx_safe || true
 
     if echo "$issue_output" | grep -qi 'rateLimited\|too many certificates'; then
       retry_after="$(echo "$issue_output" | sed -n 's/.*retry after \([^:]*UTC\).*/\1/p' | head -n1)"
@@ -1205,6 +1268,9 @@ issue_cert_for_domain() {
     fi
     return 1
   }
+
+  cleanup_http_challenge_server "$challenge_conf"
+  reload_nginx_safe || true
 
   ${SUDO} mkdir -p "${SSL_DIR}/${domain}"
   "$HOME/.acme.sh/acme.sh" --install-cert -d "$domain" \
