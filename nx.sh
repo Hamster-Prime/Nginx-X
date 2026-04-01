@@ -75,11 +75,22 @@ reload_nginx_safe() {
   fi
 
   if check_cmd systemctl; then
-    ${SUDO} systemctl reload nginx
+    if ${SUDO} systemctl is-active --quiet nginx; then
+      ${SUDO} systemctl reload nginx
+      info "Nginx 已重载。"
+    else
+      ${SUDO} systemctl start nginx
+      info "检测到 Nginx 未运行，已自动启动。"
+    fi
   else
-    ${SUDO} service nginx reload
+    if ${SUDO} service nginx status >/dev/null 2>&1; then
+      ${SUDO} service nginx reload
+      info "Nginx 已重载。"
+    else
+      ${SUDO} service nginx start
+      info "检测到 Nginx 未运行，已自动启动。"
+    fi
   fi
-  info "Nginx 已重载。"
 }
 
 ensure_dirs() {
@@ -199,19 +210,33 @@ upgrade_nginx_smart() {
 
   local local_ver latest_ver backup_dir pkg
   local_ver="$(nginx_local_version)"
-  latest_ver="$(nginx_latest_version_online)"
 
-  if [[ -z "$latest_ver" ]]; then
-    warn "无法获取官方最新版本，建议稍后重试。"
-    return 1
+  # 仅在检测到 nginx 官方源时，才按官网版本做对比，避免 Debian/Ubuntu 默认源误判
+  local using_official_repo="0"
+  if [[ -f /etc/apt/sources.list.d/nginx.list ]] || [[ -f /etc/yum.repos.d/nginx.repo ]]; then
+    using_official_repo="1"
+  fi
+
+  if [[ "$using_official_repo" == "1" ]]; then
+    latest_ver="$(nginx_latest_version_online)"
+  else
+    latest_ver=""
   fi
 
   note "本地版本：${local_ver}"
-  note "官方最新：${latest_ver}"
+  if [[ "$using_official_repo" == "1" ]]; then
+    if [[ -z "$latest_ver" ]]; then
+      warn "无法获取官方最新版本，建议稍后重试。"
+      return 1
+    fi
+    note "官方最新：${latest_ver}"
 
-  if ! version_gt "$latest_ver" "$local_ver"; then
-    info "当前已是最新版本，无需升级。"
-    return 0
+    if ! version_gt "$latest_ver" "$local_ver"; then
+      info "当前已是最新版本，无需升级。"
+      return 0
+    fi
+  else
+    warn "当前未检测到 nginx 官方源（nginx.org），将按系统仓库执行升级检查。"
   fi
 
   backup_dir="/etc/nginx-backup-$(date +%F-%H%M%S)"
