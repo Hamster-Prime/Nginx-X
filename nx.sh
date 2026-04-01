@@ -1176,6 +1176,7 @@ cleanup_http_challenge_server() {
 
 precheck_http01() {
   # 证书申请前自检：DNS、80监听、challenge本地命中、域名回环可达
+  # 返回码：0=通过，10=软失败(可继续)，11=硬失败(不建议继续)
   local domain="$1"
   local token file_path local_url domain_url local_body domain_body
 
@@ -1186,14 +1187,14 @@ precheck_http01() {
   dns_out="$(getent ahosts "$domain" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ' || true)"
   if [[ -z "$dns_out" ]]; then
     error "自检失败：域名 ${domain} 未解析到任何 IP。"
-    return 1
+    return 11
   fi
   info "DNS解析：${dns_out}"
 
   # 2) 本机80监听检查
   if ! ss -lnt | awk 'NR>1{print $4}' | grep -qE '(^|:)80$'; then
     error "自检失败：本机未监听 80 端口。"
-    return 1
+    return 11
   fi
 
   # 3) challenge 文件本地命中检查
@@ -1207,7 +1208,7 @@ precheck_http01() {
   if [[ "$local_body" != "$token" ]]; then
     ${SUDO} rm -f "$file_path" 2>/dev/null || true
     error "自检失败：本机 challenge 路径未命中（${local_url}）。"
-    return 1
+    return 11
   fi
 
   # 4) 域名回环可达检查（模拟 CA 通过域名访问 80）
@@ -1216,9 +1217,10 @@ precheck_http01() {
   ${SUDO} rm -f "$file_path" 2>/dev/null || true
 
   if [[ "$domain_body" != "$token" ]]; then
-    error "自检失败：域名 ${domain} 的 80 回源不可达或返回内容不匹配。"
+    warn "自检警告：域名 ${domain} 的 80 回源不可达或返回内容不匹配。"
+    warn "这可能是网络/回环差异导致的误判。"
     warn "请检查云安全组/防火墙/NAT/CDN 对 80 端口的放行。"
-    return 1
+    return 10
   fi
 
   info "HTTP-01 自检通过。"
@@ -1251,9 +1253,24 @@ issue_cert() {
   fi
 
   if ! precheck_http01 "$domain"; then
-    cleanup_http_challenge_server "$challenge_conf"
-    reload_nginx_safe || true
-    return 1
+    local pre_rc=$?
+    if [[ $pre_rc -eq 10 ]]; then
+      if ! confirm "自检存在风险，是否仍继续申请证书？"; then
+        cleanup_http_challenge_server "$challenge_conf"
+        reload_nginx_safe || true
+        info "已取消申请。"
+        return 1
+      fi
+      warn "你选择继续申请，将直接尝试签发。"
+    else
+      if ! confirm "自检失败（建议先修复），是否仍强制继续申请？"; then
+        cleanup_http_challenge_server "$challenge_conf"
+        reload_nginx_safe || true
+        info "已取消申请。"
+        return 1
+      fi
+      warn "你选择强制继续申请。"
+    fi
   fi
 
   ensure_acme_installed || return 1
@@ -1313,9 +1330,24 @@ issue_cert_for_domain() {
   fi
 
   if ! precheck_http01 "$domain"; then
-    cleanup_http_challenge_server "$challenge_conf"
-    reload_nginx_safe || true
-    return 1
+    local pre_rc=$?
+    if [[ $pre_rc -eq 10 ]]; then
+      if ! confirm "自检存在风险，是否仍继续申请证书？"; then
+        cleanup_http_challenge_server "$challenge_conf"
+        reload_nginx_safe || true
+        info "已取消申请。"
+        return 1
+      fi
+      warn "你选择继续申请，将直接尝试签发。"
+    else
+      if ! confirm "自检失败（建议先修复），是否仍强制继续申请？"; then
+        cleanup_http_challenge_server "$challenge_conf"
+        reload_nginx_safe || true
+        info "已取消申请。"
+        return 1
+      fi
+      warn "你选择强制继续申请。"
+    fi
   fi
 
   ensure_acme_installed || return 1
