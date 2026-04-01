@@ -455,6 +455,7 @@ apply_conf_with_rollback() {
 add_reverse_proxy() {
   local domain listen_port backend_port target tmp auto_https
   local desired_port create_port force_enable_https="0"
+  local desired_port create_port force_enable_https="0"
 
   require_nginx_installed || return 1
 
@@ -579,6 +580,9 @@ add_external_url_proxy() {
     error "监听端口不合法。"
     return 1
   fi
+
+  desired_port="$listen_port"
+  create_port="$listen_port"
 
   read -rp "请输入外部上游 URL（http/https）: " upstream_url
   if [[ ! "$upstream_url" =~ ^https?:// ]]; then
