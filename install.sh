@@ -11,6 +11,12 @@ if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
   SUDO="sudo"
 fi
 
+confirm() {
+  local prompt="$1"
+  read -rp "${prompt} [y/N]: " ans
+  [[ "$ans" =~ ^[Yy]$ ]]
+}
+
 install_git_if_needed() {
   if command -v git >/dev/null 2>&1; then
     return 0
@@ -75,9 +81,23 @@ bootstrap_install() {
   if [[ -d "$INSTALL_DIR/.git" ]]; then
     echo "[INFO] 检测到已安装目录，正在更新到最新版本..."
     ${SUDO} git -C "$INSTALL_DIR" pull --ff-only
+  elif [[ -e "$INSTALL_DIR" ]]; then
+    echo "[WARN] 目标目录已存在，但不是 Git 仓库：$INSTALL_DIR"
+    if [[ -t 0 && -t 1 ]]; then
+      if ! confirm "是否清空该目录并重新安装？"; then
+        echo "[INFO] 已取消安装。"
+        exit 0
+      fi
+    else
+      echo "[ERROR] 非交互模式下不会自动删除已有目录，请先手动清理：$INSTALL_DIR"
+      exit 1
+    fi
+
+    ${SUDO} rm -rf "$INSTALL_DIR"
+    echo "[INFO] 已清理旧目录，重新克隆仓库到 $INSTALL_DIR"
+    ${SUDO} git clone "$REPO_URL" "$INSTALL_DIR"
   else
     echo "[INFO] 克隆仓库到 $INSTALL_DIR"
-    ${SUDO} rm -rf "$INSTALL_DIR"
     ${SUDO} git clone "$REPO_URL" "$INSTALL_DIR"
   fi
 

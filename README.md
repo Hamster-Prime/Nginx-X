@@ -33,6 +33,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/Xiuyixx/Nginx-X/main/ins
 说明：
 - 首次执行会克隆到 `/opt/Nginx-X`
 - 再次执行会自动拉取最新代码
+- 如果 `/opt/Nginx-X` 已存在但不是 Git 仓库，安装器会先提示确认，再决定是否清空重装
 - 安装完成后自动启动 `nx`
 
 ## 当前功能
@@ -91,6 +92,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/Xiuyixx/Nginx-X/main/ins
    - 选项2：卸载 Nginx（彻底卸载并清空 Nginx 及配置）
    - 选项3：卸载 Acme（彻底卸载并清空 Acme 配置/邮箱信息）
    - 选项4：全部卸载（脚本 + Nginx + Acme 一并清理）
+   - 高风险卸载操作会显示删除摘要并要求二次确认
 
 ## 已知限制
 

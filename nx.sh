@@ -2217,7 +2217,13 @@ uninstall_nginx_only() {
   pkg="$(detect_pkg_mgr)"
 
   warn "将彻底卸载 Nginx 并清空相关配置/日志目录。"
+  warn "将删除：/etc/nginx /var/log/nginx /var/cache/nginx /usr/share/nginx"
   if ! confirm "确认继续卸载 Nginx？"; then
+    info "已取消。"
+    return 0
+  fi
+
+  if ! confirm "这是高风险操作，是否再次确认卸载 Nginx？"; then
     info "已取消。"
     return 0
   fi
@@ -2248,7 +2254,13 @@ uninstall_nginx_only() {
 
 uninstall_acme_only() {
   warn "将彻底卸载 acme.sh 并清空证书/配置及邮箱信息。"
+  warn "将删除：$HOME/.acme.sh ${SSL_DIR} ${EMAIL_CONF}"
   if ! confirm "确认继续卸载 Acme？"; then
+    info "已取消。"
+    return 0
+  fi
+
+  if ! confirm "这是高风险操作，是否再次确认卸载 Acme？"; then
     info "已取消。"
     return 0
   fi
@@ -2271,7 +2283,13 @@ uninstall_acme_only() {
 
 uninstall_all() {
   warn "将执行全部卸载：本脚本 + Nginx（含配置清理）。"
+  warn "该操作会同时清理 Nginx、证书、脚本入口和相关目录。"
   if ! confirm "确认继续全部卸载？"; then
+    info "已取消。"
+    return 0
+  fi
+
+  if ! confirm "这是最高风险操作，是否再次确认全部卸载？"; then
     info "已取消。"
     return 0
   fi
