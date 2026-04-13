@@ -300,7 +300,18 @@ valid_domain() {
 
 valid_ipv4_host() {
   local ip="$1"
-  [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
+  local IFS=.
+  local -a octets
+
+  [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+  read -r -a octets <<< "$ip"
+  [[ ${#octets[@]} -eq 4 ]] || return 1
+
+  local octet
+  for octet in "${octets[@]}"; do
+    [[ "$octet" =~ ^[0-9]+$ ]] || return 1
+    (( octet >= 0 && octet <= 255 )) || return 1
+  done
 }
 
 valid_server_name_input() {
@@ -469,7 +480,6 @@ apply_conf_with_rollback() {
 add_reverse_proxy() {
   local domain listen_port backend_port target tmp auto_https
   local desired_port create_port force_enable_https="0"
-  local desired_port create_port force_enable_https="0"
 
   require_nginx_installed || return 1
 
@@ -525,7 +535,7 @@ add_reverse_proxy() {
   fi
 
   target="$(conf_target_path "$domain" "$desired_port")"
-  tmp="/tmp/nginxx-${domain}.conf"
+  tmp="$(mktemp /tmp/nginxx-${domain}.XXXXXX.conf)"
 
   build_proxy_conf "$domain" "$create_port" "$backend_port" "$tmp"
   if apply_conf_with_rollback "$tmp" "$target"; then
@@ -641,7 +651,7 @@ add_external_url_proxy() {
   fi
 
   target="$(conf_target_path "$domain" "$desired_port")"
-  tmp="/tmp/nginxx-external-${domain}.conf"
+  tmp="$(mktemp /tmp/nginxx-external-${domain}.XXXXXX.conf)"
 
   build_external_proxy_conf "$domain" "$create_port" "$upstream_url" "$stream_mode" "$tmp"
   if apply_conf_with_rollback "$tmp" "$target"; then
@@ -817,7 +827,7 @@ modify_conf() {
     fi
   fi
 
-  tmp="/tmp/nginxx-mod-${new_domain}.conf"
+  tmp="$(mktemp /tmp/nginxx-mod-${new_domain}.XXXXXX.conf)"
   build_proxy_conf "$new_domain" "$new_listen" "$new_backend" "$tmp"
 
   # 修改后默认写入 .conf；也可选择立即停用
@@ -1095,35 +1105,38 @@ ensure_email_interactive() {
 ensure_acme_location_for_domain_conf() {
   # 为已存在的反代配置补齐 ACME 验证 location，避免申请证书时被反代到后端
   local domain="$1"
-  local conf_file="${CONF_DIR}/${domain}.conf"
-  local tmp_file
+  local -a matches
+  local conf_file tmp_file
 
-  [[ -f "$conf_file" ]] || return 0
+  mapfile -t matches < <(grep -l "^# domain=${domain}$" "${CONF_DIR}"/*.conf 2>/dev/null || true)
+  [[ ${#matches[@]} -gt 0 ]] || return 0
 
-  if grep -q '/\.well-known/acme-challenge/' "$conf_file"; then
-    return 0
-  fi
+  for conf_file in "${matches[@]}"; do
+    if grep -q '/\.well-known/acme-challenge/' "$conf_file"; then
+      continue
+    fi
 
-  tmp_file="/tmp/nginxx-acme-loc-${domain}.conf"
-  awk '
-    BEGIN{inserted=0}
-    {
-      if (inserted==0 && $0 ~ /^[[:space:]]*location \/ \{/ ) {
-        print "    # ACME HTTP-01 验证路径（证书申请/续期）"
-        print "    location ^~ /.well-known/acme-challenge/ {"
-        print "        root /usr/share/nginx/html;"
-        print "        default_type \"text/plain\";"
-        print "        try_files $uri =404;"
-        print "    }"
-        print ""
-        inserted=1
+    tmp_file="$(mktemp /tmp/nginxx-acme-loc-${domain}.XXXXXX.conf)"
+    awk '
+      BEGIN{inserted=0}
+      {
+        if (inserted==0 && $0 ~ /^[[:space:]]*location \/ \{/ ) {
+          print "    # ACME HTTP-01 验证路径（证书申请/续期）"
+          print "    location ^~ /.well-known/acme-challenge/ {"
+          print "        root /usr/share/nginx/html;"
+          print "        default_type \"text/plain\";"
+          print "        try_files $uri =404;"
+          print "    }"
+          print ""
+          inserted=1
+        }
+        print $0
       }
-      print $0
-    }
-  ' "$conf_file" > "$tmp_file"
+    ' "$conf_file" > "$tmp_file"
 
-  ${SUDO} cp -a "$tmp_file" "$conf_file"
-  rm -f "$tmp_file"
+    ${SUDO} cp -a "$tmp_file" "$conf_file"
+    rm -f "$tmp_file"
+  done
 }
 
 ensure_http_challenge_server() {
@@ -1146,7 +1159,10 @@ ensure_http_challenge_server() {
     return 0
   fi
 
-  cat > /tmp/.acme-challenge-${domain}.conf <<EOF
+  local tmp_challenge
+  tmp_challenge="$(mktemp /tmp/.acme-challenge-${domain}.XXXXXX.conf)"
+
+  cat > "$tmp_challenge" <<EOF
 server {
     listen 80;
     server_name ${domain};
@@ -1163,8 +1179,8 @@ server {
 }
 EOF
 
-  ${SUDO} cp -a /tmp/.acme-challenge-${domain}.conf "$challenge_conf"
-  rm -f /tmp/.acme-challenge-${domain}.conf
+  ${SUDO} cp -a "$tmp_challenge" "$challenge_conf"
+  rm -f "$tmp_challenge"
   echo "$challenge_conf"
 }
 
@@ -1252,8 +1268,13 @@ issue_cert() {
     return 1
   fi
 
-  if ! precheck_http01 "$domain"; then
-    local pre_rc=$?
+  local pre_rc=0
+  if precheck_http01 "$domain"; then
+    pre_rc=0
+  else
+    pre_rc=$?
+  fi
+  if (( pre_rc != 0 )); then
     if [[ $pre_rc -eq 10 ]]; then
       if ! confirm "自检存在风险，是否仍继续申请证书？"; then
         cleanup_http_challenge_server "$challenge_conf"
@@ -1329,8 +1350,13 @@ issue_cert_for_domain() {
     return 1
   fi
 
-  if ! precheck_http01 "$domain"; then
-    local pre_rc=$?
+  local pre_rc=0
+  if precheck_http01 "$domain"; then
+    pre_rc=0
+  else
+    pre_rc=$?
+  fi
+  if (( pre_rc != 0 )); then
     if [[ $pre_rc -eq 10 ]]; then
       if ! confirm "自检存在风险，是否仍继续申请证书？"; then
         cleanup_http_challenge_server "$challenge_conf"
@@ -1562,7 +1588,7 @@ BLOCK
     fi
   fi
 
-  tmp="/tmp/nginxx-disable-https-${domain}.conf"
+  tmp="$(mktemp /tmp/nginxx-disable-https-${domain}.XXXXXX.conf)"
   cat > "$tmp" <<EOF
 # managed_by=Nginx-X
 # domain=${domain}
@@ -1754,7 +1780,7 @@ BLOCK
 )
   fi
 
-  tmp="/tmp/nginxx-https-${domain}.conf"
+  tmp="$(mktemp /tmp/nginxx-https-${domain}.XXXXXX.conf)"
 
   # 生成 HTTPS 配置：继承原监听端口（支持非标端口，如 7777）
   cat > "$tmp" <<EOF
@@ -1886,7 +1912,10 @@ ensure_status_endpoint() {
     return 0
   fi
 
-  cat > /tmp/nginxx-status.conf <<'EOF'
+  local tmp_status
+  tmp_status="$(mktemp /tmp/nginxx-status.XXXXXX.conf)"
+
+  cat > "$tmp_status" <<'EOF'
 server {
     listen 127.0.0.1:8088;
     server_name 127.0.0.1;
@@ -1899,8 +1928,11 @@ server {
 }
 EOF
 
-  apply_conf_with_rollback /tmp/nginxx-status.conf "$status_conf" || return 1
-  rm -f /tmp/nginxx-status.conf
+  apply_conf_with_rollback "$tmp_status" "$status_conf" || {
+    rm -f "$tmp_status"
+    return 1
+  }
+  rm -f "$tmp_status"
 }
 
 show_nginx_realtime_status() {
