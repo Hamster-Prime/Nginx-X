@@ -48,6 +48,10 @@ confirm() {
   [[ "$ans" =~ ^[Yy]$ ]]
 }
 
+run_menu_action() {
+  "$@" || true
+}
+
 # ---------- 基础能力 ----------
 check_cmd() {
   command -v "$1" >/dev/null 2>&1
@@ -1104,21 +1108,31 @@ modify_conf() {
     return $?
   fi
 
+  local current_domain current_listen current_backend
   local new_domain new_listen new_backend tmp new_target
 
-  read -rp "新的域名: " new_domain
-  if ! valid_domain "$new_domain"; then
-    error "域名格式不合法。"
+  current_domain="$(extract_domain_from_conf "$src")"
+  current_listen="$(conf_meta_get "$src" listen_port)"
+  current_backend="$(conf_meta_get "$src" backend_port)"
+  [[ -z "$current_listen" ]] && current_listen="80"
+  [[ -z "$current_backend" ]] && current_backend="3000"
+
+  read -rp "新的域名（当前 ${current_domain}）: " new_domain
+  [[ -z "$new_domain" ]] && new_domain="$current_domain"
+  if ! valid_server_name_input "$new_domain"; then
+    error "域名/IP 格式不合法。"
     return 1
   fi
 
-  read -rp "新的监听端口: " new_listen
+  read -rp "新的监听端口（当前 ${current_listen}）: " new_listen
+  [[ -z "$new_listen" ]] && new_listen="$current_listen"
   if ! valid_port "$new_listen"; then
     error "监听端口不合法。"
     return 1
   fi
 
-  read -rp "新的后端端口: " new_backend
+  read -rp "新的后端端口（当前 ${current_backend}）: " new_backend
+  [[ -z "$new_backend" ]] && new_backend="$current_backend"
   if ! valid_port "$new_backend"; then
     error "后端端口不合法。"
     return 1
@@ -1411,11 +1425,11 @@ config_file_action_menu() {
     read -rp "请选择: " c
 
     case "$c" in
-      1) enable_conf "$file"; pause; return 0 ;;
-      2) disable_conf "$file"; pause; return 0 ;;
-      3) modify_conf "$file"; pause; return 0 ;;
-      4) edit_conf_manual "$file"; pause; return 0 ;;
-      5) delete_conf "$file"; pause; return 0 ;;
+      1) run_menu_action enable_conf "$file"; pause; return 0 ;;
+      2) run_menu_action disable_conf "$file"; pause; return 0 ;;
+      3) run_menu_action modify_conf "$file"; pause; return 0 ;;
+      4) run_menu_action edit_conf_manual "$file"; pause; return 0 ;;
+      5) run_menu_action delete_conf "$file"; pause; return 0 ;;
       0) return 0 ;;
       *) warn "无效输入。"; pause ;;
     esac
@@ -1466,8 +1480,8 @@ config_entry_menu() {
     read -rp "请选择: " c
 
     case "$c" in
-      1) add_reverse_proxy; pause ;;
-      2) add_external_url_proxy; pause ;;
+      1) run_menu_action add_reverse_proxy; pause ;;
+      2) run_menu_action add_external_url_proxy; pause ;;
       3) config_manage_menu ;;
       0) return 0 ;;
       *) warn "无效输入。"; pause ;;
@@ -1917,7 +1931,7 @@ cert_list_action_menu() {
             return 1
           fi
         fi
-        issue_cert_for_domain "$domain"
+        run_menu_action issue_cert_for_domain "$domain"
         pause
         return 0
         ;;
@@ -2426,10 +2440,10 @@ cert_menu() {
     read -rp "请选择: " c
 
     case "$c" in
-      1) set_acme_email; pause ;;
-      2) issue_cert || true; pause ;;
+      1) run_menu_action set_acme_email; pause ;;
+      2) run_menu_action issue_cert; pause ;;
       3) cert_list_menu ;;
-      4) enable_https_for_domain || true; pause ;;
+      4) run_menu_action enable_https_for_domain; pause ;;
       0) return 0 ;;
       *) warn "无效输入。"; pause ;;
     esac
@@ -2801,10 +2815,10 @@ uninstall_menu() {
     read -rp "请选择: " c
 
     case "$c" in
-      1) uninstall_script_only; pause ;;
-      2) uninstall_nginx_only; pause ;;
-      3) uninstall_acme_only; pause ;;
-      4) uninstall_all; pause ;;
+      1) run_menu_action uninstall_script_only; pause ;;
+      2) run_menu_action uninstall_nginx_only; pause ;;
+      3) run_menu_action uninstall_acme_only; pause ;;
+      4) run_menu_action uninstall_all; pause ;;
       0) return 0 ;;
       *) warn "无效输入。"; pause ;;
     esac
@@ -2837,7 +2851,7 @@ main() {
     read -rp "请选择功能: " choice
 
     case "$choice" in
-      1) install_or_upgrade_nginx; pause ;;
+      1) run_menu_action install_or_upgrade_nginx; pause ;;
       2) config_entry_menu ;;
       3) cert_menu ;;
       4) realtime_info_menu ;;
