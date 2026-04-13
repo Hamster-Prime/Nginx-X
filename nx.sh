@@ -2209,6 +2209,7 @@ site_health_menu() {
           info "检查完成：${total} 个站点全部正常。"
         else
           warn "检查完成：${total} 个站点中有 ${bad} 个异常，请根据上面的 HTTP 状态码、DNS 和证书信息排查。"
+          warn "最终效果仍请结合浏览器或客户端实际访问情况人工核查。"
         fi
         pause
         ;;
