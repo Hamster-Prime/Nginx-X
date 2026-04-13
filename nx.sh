@@ -2047,6 +2047,145 @@ conf_https_enabled() {
   grep -q '^# https_enabled=true' "$conf_file" 2>/dev/null || grep -qE 'listen[[:space:]]+[0-9]+[[:space:]]+ssl' "$conf_file" 2>/dev/null
 }
 
+health_check_conf_file() {
+  local conf_file="$1"
+  local domain listen_port mode upstream_url stream_upstream_url
+  local scheme target_url status_label http_code remote_ip dns_ips tls_days
+  local status_ok=1
+
+  domain="$(extract_domain_from_conf "$conf_file")"
+  listen_port="$(conf_meta_get "$conf_file" listen_port)"
+  mode="$(conf_meta_get "$conf_file" mode)"
+  upstream_url="$(conf_meta_get "$conf_file" upstream_url)"
+  stream_upstream_url="$(conf_meta_get "$conf_file" stream_upstream_url)"
+  [[ -z "$listen_port" ]] && listen_port="80"
+
+  if conf_https_enabled "$conf_file"; then
+    scheme="https"
+  else
+    scheme="http"
+  fi
+
+  if [[ "$listen_port" == "80" && "$scheme" == "http" ]]; then
+    target_url="http://${domain}"
+  elif [[ "$listen_port" == "443" && "$scheme" == "https" ]]; then
+    target_url="https://${domain}"
+  else
+    target_url="${scheme}://${domain}:${listen_port}"
+  fi
+
+  dns_ips="$(getent ahosts "$domain" 2>/dev/null | awk '{print $1}' | sort -u | paste -sd ',' - || true)"
+  [[ -z "$dns_ips" ]] && dns_ips="未解析"
+
+  remote_ip="$(curl -k -sS -o /dev/null --connect-timeout 8 --max-time 15 -w '%{remote_ip}' "$target_url" 2>/dev/null || true)"
+  http_code="$(curl -k -sS -o /dev/null --connect-timeout 8 --max-time 15 -L -w '%{http_code}' "$target_url" 2>/dev/null || true)"
+  [[ -z "$http_code" ]] && http_code="000"
+
+  if [[ "$scheme" == "https" ]]; then
+    tls_days="$(echo | openssl s_client -servername "$domain" -connect "${domain}:${listen_port}" 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | sed 's/notAfter=//' | xargs -I{} date -d '{}' +%s 2>/dev/null | awk -v now="$(date +%s)" '{if($1>0) printf "%d", int(($1-now)/86400); else print "-"}' || true)"
+    [[ -z "$tls_days" ]] && tls_days="-"
+  else
+    tls_days="-"
+  fi
+
+  if [[ "$http_code" =~ ^2|3 ]]; then
+    status_label="正常"
+  else
+    status_label="异常"
+    status_ok=0
+  fi
+
+  echo "- $(basename "$conf_file")"
+  echo "  域名: ${domain}"
+  echo "  入口: ${target_url}"
+  echo "  协议: ${scheme^^} | HTTP: ${http_code} | 状态: ${status_label}"
+  echo "  DNS: ${dns_ips}"
+  [[ -n "$remote_ip" ]] && echo "  命中IP: ${remote_ip}"
+  if [[ "$scheme" == "https" ]]; then
+    echo "  证书剩余天数: ${tls_days}"
+  fi
+  if [[ "$mode" == "external" ]]; then
+    echo "  主上游: ${upstream_url}"
+    [[ -n "$stream_upstream_url" ]] && echo "  推流上游: ${stream_upstream_url}"
+  else
+    echo "  后端端口: $(conf_meta_get "$conf_file" backend_port)"
+  fi
+  echo
+
+  return $status_ok
+}
+
+site_health_menu() {
+  local -a confs
+  local idx conf_file bad=0 total=0
+
+  require_nginx_installed || return 1
+
+  while true; do
+    clear
+    echo "========== 站点健康检查 =========="
+    echo "1) 检查所有站点"
+    echo "2) 检查单个站点"
+    echo "0) 返回上一级"
+    echo "================================="
+    read -rp "请选择: " c
+
+    case "$c" in
+      1)
+        clear
+        mapfile -t confs < <(find "${CONF_DIR}" -maxdepth 1 -type f -name '*.conf' ! -name 'nginx_status.conf' 2>/dev/null | sort || true)
+        if [[ ${#confs[@]} -eq 0 ]]; then
+          warn "当前没有可检查的站点配置。请先创建站点。"
+          pause
+          continue
+        fi
+        bad=0
+        total=0
+        for conf_file in "${confs[@]}"; do
+          total=$((total+1))
+          if ! health_check_conf_file "$conf_file"; then
+            bad=$((bad+1))
+          fi
+        done
+        if (( bad == 0 )); then
+          info "检查完成：${total} 个站点全部正常。"
+        else
+          warn "检查完成：${total} 个站点中有 ${bad} 个异常，请根据上面的 HTTP 状态码、DNS 和证书信息排查。"
+        fi
+        pause
+        ;;
+      2)
+        clear
+        mapfile -t confs < <(find "${CONF_DIR}" -maxdepth 1 -type f -name '*.conf' ! -name 'nginx_status.conf' 2>/dev/null | sort || true)
+        if [[ ${#confs[@]} -eq 0 ]]; then
+          warn "当前没有可检查的站点配置。请先创建站点。"
+          pause
+          continue
+        fi
+        echo "请选择要检查的站点："
+        for i in "${!confs[@]}"; do
+          echo "  $((i+1))) $(basename "${confs[$i]}")  [域名: $(extract_domain_from_conf "${confs[$i]}")]"
+        done
+        echo "  0) 返回上一级"
+        read -rp "选择序号: " idx
+        if [[ "$idx" == "0" ]]; then
+          continue
+        fi
+        if ! [[ "$idx" =~ ^[0-9]+$ ]] || (( idx < 1 || idx > ${#confs[@]} )); then
+          warn "无效序号。请输入列表中存在的配置编号。"
+          pause
+          continue
+        fi
+        clear
+        health_check_conf_file "${confs[$((idx-1))]}" || true
+        pause
+        ;;
+      0) return 0 ;;
+      *) warn "无效输入。请输入 0-2 之间的菜单编号。"; pause ;;
+    esac
+  done
+}
+
 disable_https_for_conf_file() {
   local domain="$1"
   local conf_file="$2"
@@ -2837,7 +2976,8 @@ main_menu() {
   echo "2) 配置管理"
   echo "3) 证书管理"
   echo "4) 实时信息"
-  echo "5) 卸载"
+  echo "5) 站点健康检查"
+  echo "6) 卸载"
   echo "0) 退出"
   echo "========================================"
 }
@@ -2855,9 +2995,10 @@ main() {
       2) config_entry_menu ;;
       3) cert_menu ;;
       4) realtime_info_menu ;;
-      5) uninstall_menu ;;
+      5) site_health_menu ;;
+      6) uninstall_menu ;;
       0) info "已退出 ${APP_NAME}。"; exit 0 ;;
-      *) warn "无效输入，请输入主菜单中的编号（0-5）。"; pause ;;
+      *) warn "无效输入，请输入主菜单中的编号（0-6）。"; pause ;;
     esac
   done
 }
