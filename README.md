@@ -95,7 +95,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/Xiuyixx/Nginx-X/main/ins
    - 若不存在 Host 专用日志，则回退为基于最近 5000 条 `access.log` 的估算
    - 每 5 秒自动刷新，按回车返回上一级
 
-5. **站点健康检查**
+5. **健康检查**
    - 作为独立菜单提供，不与配置管理混在一起
    - 支持 `检查所有站点` / `检查单个站点`
    - 检查内容包括：入口 URL、HTTP 状态码、DNS 解析结果、命中 IP
