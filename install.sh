@@ -60,19 +60,9 @@ install_local() {
 
   chmod +x "$source_script"
 
-  # 兼容极简系统：确保 /usr/local/bin 存在
-  if [[ $EUID -ne 0 ]]; then
-    sudo mkdir -p "$(dirname "$TARGET_BIN")"
-  else
-    mkdir -p "$(dirname "$TARGET_BIN")"
-  fi
-
-  if [[ $EUID -ne 0 ]]; then
-    echo "[INFO] Need sudo to install launcher to ${TARGET_BIN}"
-    sudo install -m 0755 "$source_script" "$TARGET_BIN"
-  else
-    install -m 0755 "$source_script" "$TARGET_BIN"
-  fi
+  # 兼容极简系统：确保 /usr/local/bin 存在并安装脚本
+  ${SUDO} mkdir -p "$(dirname "$TARGET_BIN")"
+  ${SUDO} install -m 0755 "$source_script" "$TARGET_BIN"
 
   echo "[OK] Installed. You can now run: nx"
 
@@ -123,7 +113,7 @@ bootstrap_install() {
   fi
 
   # 进入安装目录执行同一个 install.sh（仅安装，不在子进程里启动 nx）
-  if ! ${SUDO} bash "$INSTALL_DIR/install.sh" --no-run; then
+  if ! ${SUDO} env NO_RUN=1 bash "$INSTALL_DIR/install.sh" --no-run; then
     echo "[ERROR] 安装器执行失败。请根据上面的输出检查具体报错。"
     exit 1
   fi
