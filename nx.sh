@@ -170,10 +170,23 @@ nginx_local_version() {
 }
 
 nginx_latest_version_online() {
-  # 使用 Nginx 官网下载页获取最新稳定版版本号
+  # 使用 Nginx 官网下载页中的 stable 区块获取最新稳定版版本号
   local latest
-  latest="$(curl -fsSL https://nginx.org/en/download.html | grep -Eo 'nginx-[0-9]+\.[0-9]+\.[0-9]+' | sed 's/nginx-//' | sort -V | tail -n1 || true)"
+  latest="$(curl -fsSL https://nginx.org/en/download.html | awk '
+    /Stable version/ {in_stable=1; next}
+    in_stable && /Mainline version/ {in_stable=0}
+    in_stable {
+      while (match($0, /nginx-[0-9]+\.[0-9]+\.[0-9]+/)) {
+        print substr($0, RSTART + 6, RLENGTH - 6)
+        $0 = substr($0, RSTART + RLENGTH)
+      }
+    }
+  ' | sort -V | tail -n1 || true)"
   echo "$latest"
+}
+
+escape_ere() {
+  printf '%s' "$1" | sed -e 's/[][\\.^$*+?(){}|/]/\\&/g'
 }
 
 version_gt() {
@@ -1644,9 +1657,12 @@ ensure_http_challenge_server() {
   # 为“非80端口业务配置”补一个临时 80 验证入口，保证 HTTP-01 可达
   local domain="$1"
   local challenge_conf="${CONF_DIR}/acme-challenge-${domain}.conf"
+  local domain_ere
+
+  domain_ere="$(escape_ere "$domain")"
 
   # 检测是否已存在“同域名 + 80监听”的配置
-  if awk -v d="$domain" '
+  if awk -v d="$domain_ere" '
     BEGIN{in_server=0; has80=0; hasDomain=0}
     /server\s*\{/ {in_server=1; has80=0; hasDomain=0}
     in_server && /listen[[:space:]]+80([[:space:]]|;)/ {has80=1}
@@ -1721,10 +1737,10 @@ precheck_http01() {
   echo "$token" | ${SUDO} tee "$file_path" >/dev/null
 
   local_url="http://127.0.0.1/.well-known/acme-challenge/${token}"
-  local_body="$(curl -fsS --max-time 8 "$local_url" 2>/dev/null || true)"
+  local_body="$(curl -fsS --max-time 8 -H "Host: ${domain}" "$local_url" 2>/dev/null || true)"
   if [[ "$local_body" != "$token" ]]; then
     ${SUDO} rm -f "$file_path" 2>/dev/null || true
-    error "自检失败：本机 challenge 路径未命中（${local_url}）。"
+    error "自检失败：本机 challenge 路径未命中（${local_url}，Host: ${domain}）。"
     return 11
   fi
 
