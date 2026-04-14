@@ -1487,7 +1487,7 @@ config_file_action_menu() {
 config_manage_menu() {
   require_nginx_installed || {
     pause
-    return 1
+    return 0
   }
 
   while true; do
@@ -2675,7 +2675,7 @@ EOF
 cert_menu() {
   require_nginx_installed || {
     pause
-    return 1
+    return 0
   }
 
   while true; do
