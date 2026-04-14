@@ -19,7 +19,8 @@ APP_VERSION="1.7.0"
 CONF_DIR="/etc/nginx/conf.d"
 SSL_DIR="/etc/nginx/ssl"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-EMAIL_CONF="${SCRIPT_DIR}/.email.conf"
+STATE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/nginxx"
+EMAIL_CONF="${STATE_DIR}/email.conf"
 
 SUDO=""
 if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
@@ -128,6 +129,10 @@ reload_nginx_safe() {
 ensure_dirs() {
   ${SUDO} mkdir -p "$CONF_DIR"
   ${SUDO} mkdir -p "$SSL_DIR"
+}
+
+ensure_state_dir() {
+  mkdir -p "$STATE_DIR"
 }
 
 disable_default_conf_if_exists() {
@@ -1539,6 +1544,7 @@ config_entry_menu() {
 
 # ---------- 功能5：证书管理（acme.sh） ----------
 load_email() {
+  ensure_state_dir
   if [[ -f "$EMAIL_CONF" ]]; then
     # shellcheck disable=SC1090
     . "$EMAIL_CONF"
@@ -1547,6 +1553,7 @@ load_email() {
 
 save_email() {
   local email="$1"
+  ensure_state_dir
   cat > "$EMAIL_CONF" <<EOF
 ACME_EMAIL="${email}"
 EOF
@@ -1979,7 +1986,7 @@ cert_list_action_menu() {
           if ! ensure_email_interactive; then
             error "邮箱未设置，无法重新申请。"
             pause
-            return 1
+            return 0
           fi
         fi
         run_menu_action issue_cert_for_domain "$domain"
@@ -2960,7 +2967,7 @@ uninstall_script_only() {
   fi
 
   # 2) 清理脚本目录下运行状态文件
-  rm -f "${SCRIPT_DIR}/.email.conf" 2>/dev/null || true
+  rm -f "$EMAIL_CONF" 2>/dev/null || true
 
   # 3) 给出手动删除路径，避免后台自删失败难排查
   local dir_to_remove
