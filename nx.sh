@@ -2024,7 +2024,8 @@ cert_list_action_menu() {
 cert_list_menu() {
   if [[ ! -x "$HOME/.acme.sh/acme.sh" ]]; then
     warn "未检测到 acme.sh，请先申请证书。"
-    return 1
+    pause
+    return 0
   fi
 
   local -a certs
@@ -2917,6 +2918,11 @@ EOF
 }
 
 realtime_info_menu() {
+  require_nginx_installed || {
+    pause
+    return 0
+  }
+
   while true; do
     clear
     echo "========== 实时信息 =========="
