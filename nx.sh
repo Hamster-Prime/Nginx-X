@@ -580,13 +580,26 @@ build_external_proxy_conf() {
   local main_header_block=""
   local stream_sni_block=""
   local redirect_suffix=""
-  local upstream_host stream_host
+  local upstream_host stream_host https_meta https_cert_block
 
   upstream_host="$(url_host "$upstream_url")"
   stream_host="$(url_host "$stream_upstream_url")"
 
   [[ -z "$source_site_url" ]] && source_site_url="$upstream_url"
   [[ -z "$referer_url" && -n "$source_site_url" ]] && referer_url="$(default_referer_from_url "$source_site_url")"
+
+  https_meta=""
+  https_cert_block=""
+  if [[ "$https_enabled" == "1" ]]; then
+    https_meta="# https_enabled=true"
+    https_cert_block=$(cat <<EOF
+    ssl_certificate     ${SSL_DIR}/${domain}/fullchain.pem;
+    ssl_certificate_key ${SSL_DIR}/${domain}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+EOF
+)
+  fi
 
   case "$external_mode" in
     media)
@@ -713,6 +726,7 @@ ${main_header_block}"
 # external_mode=${external_mode}
 # domain=${domain}
 # listen_port=${listen_port}
+${https_meta}
 # upstream_url=${upstream_url}
 # stream_upstream_url=${stream_upstream_url}
 # source_site_url=${source_site_url}
@@ -736,10 +750,7 @@ server {
     http2 on;
     server_name ${domain};
 
-    ssl_certificate     ${SSL_DIR}/${domain}/fullchain.pem;
-    ssl_certificate_key ${SSL_DIR}/${domain}/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_prefer_server_ciphers off;
+${https_cert_block}
 
     location / {
         proxy_pass ${upstream_url};
@@ -792,6 +803,22 @@ EOF
   fi
 }
 
+# 若配置包含 ssl 监听，则必须同时包含证书指令，避免生成半截 HTTPS 配置
+ensure_ssl_directives_present() {
+  local conf_file="$1"
+
+  if grep -qE 'listen[[:space:]]+[^;]*[[:space:]]ssl([[:space:]]|;)' "$conf_file" 2>/dev/null; then
+    if ! grep -qE '^[[:space:]]*ssl_certificate[[:space:]]+' "$conf_file" 2>/dev/null; then
+      error "检测到 HTTPS 监听，但缺少 ssl_certificate：${conf_file}"
+      return 1
+    fi
+    if ! grep -qE '^[[:space:]]*ssl_certificate_key[[:space:]]+' "$conf_file" 2>/dev/null; then
+      error "检测到 HTTPS 监听，但缺少 ssl_certificate_key：${conf_file}"
+      return 1
+    fi
+  fi
+}
+
 apply_conf_with_rollback() {
   # 参数：临时文件、目标文件
   local tmp_conf="$1"
@@ -806,6 +833,16 @@ apply_conf_with_rollback() {
   fi
 
   ${SUDO} cp -a "$tmp_conf" "$target_conf"
+
+  if ! ensure_ssl_directives_present "$target_conf"; then
+    if [[ -f "$backup" ]]; then
+      ${SUDO} cp -a "$backup" "$target_conf"
+      ${SUDO} rm -f "$backup"
+    else
+      ${SUDO} rm -f "$target_conf"
+    fi
+    return 1
+  fi
 
   if test_output="$(${SUDO} nginx -t 2>&1)"; then
     reload_nginx_safe
